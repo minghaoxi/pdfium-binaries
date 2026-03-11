@@ -48,6 +48,14 @@ case "$OS" in
     fi
     mkdir -p "build/config/wasm"
     cp "$PATCHES/wasm/config.gn" "build/config/wasm/BUILD.gn"
+    # ==============================================================
+    # 🌟 你的专属注入代码加在这里 🌟
+    # 1. 把仓库根目录的 C++ 文件拷贝到当前目录（PDFium 源码根目录）
+    # (注意：因为脚本顶部定义了 PATCHES="$PWD/patches"，所以 $PATCHES/.. 就是仓库根目录)
+    cp "$PATCHES/../safe_pdf_wrapper.cpp" safe_pdf_wrapper.cpp
+    # 2. 闭着眼睛动态塞入编译列表（在 sources = [ 下面自动加一行）
+    sed -i '/sources = \[/a \    "safe_pdf_wrapper.cpp",' BUILD.gn
+    # ==============================================================
     ;;
 
   win)
