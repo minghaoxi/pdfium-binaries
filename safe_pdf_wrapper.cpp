@@ -1,4 +1,6 @@
-#include "fpdfview.h"
+#include "public/fpdfview.h" 
+#include "public/fpdf_edit.h" // 如果你用到了编辑功能（比如打水印）也要加前缀
+
 #include <stdint.h>
 #include <emscripten.h>
 
