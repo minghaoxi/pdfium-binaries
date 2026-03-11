@@ -52,9 +52,20 @@ case "$OS" in
     # 🌟 你的专属注入代码加在这里 🌟
     # 1. 把仓库根目录的 C++ 文件拷贝到当前目录（PDFium 源码根目录）
     # (注意：因为脚本顶部定义了 PATCHES="$PWD/patches"，所以 $PATCHES/.. 就是仓库根目录)
-    cp "$PATCHES/../safe_pdf_wrapper.cpp" safe_pdf_wrapper.cpp
-    # 2. 闭着眼睛动态塞入编译列表（在 sources = [ 下面自动加一行）
-    sed -i '/sources = \[/a \    "safe_pdf_wrapper.cpp",' BUILD.gn
+    WRAPPER_SRC="$PATCHES/../safe_pdf_wrapper.cpp"
+    if [ ! -f "$WRAPPER_SRC" ]; then
+      echo "[ERROR] safe_pdf_wrapper.cpp 未找到: $WRAPPER_SRC（请确认在 pdfium-binaries 根目录执行 build）"
+      exit 1
+    fi
+    cp "$WRAPPER_SRC" safe_pdf_wrapper.cpp
+    # 2. 在 pdfium 目标内为 emscripten 添加 sources（不能匹配第一个 sources = [，那是 pdfium_public_headers_impl 的 .h 列表，会触发 GN 语法错误）
+    #    在 output_name = "pdfium" 后插入 if (target_os == "emscripten") { sources = [ "safe_pdf_wrapper.cpp" ] }
+    sed -i '/output_name = "pdfium"/a\
+  if (target_os == "emscripten") {\
+    sources = [\
+      "safe_pdf_wrapper.cpp"\
+    ]\
+  }' BUILD.gn
     # ==============================================================
     ;;
 
