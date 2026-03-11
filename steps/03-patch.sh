@@ -62,6 +62,9 @@ case "$OS" in
     # 这一行命令会寻找 fpdfsdk/BUILD.gn 里的 fpdf_view.cpp，并在其后插入
     sed -i '/"fpdf_view.cpp",/a \    "safe_pdf_wrapper.cpp",' fpdfsdk/BUILD.gn
 
+    # 再接着注入算法实现文件 (注意每一行都要有缩进和逗号)
+    # sed -i '/"safe_pdf_wrapper.cpp",/a \    "sm2.c",\n    "sm3.c",\n    "sm4.c",' fpdfsdk/BUILD.gn
+
     echo "Injection target: fpdfsdk/BUILD.gn"
     ;;
 
