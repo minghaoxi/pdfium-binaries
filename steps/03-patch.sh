@@ -50,18 +50,19 @@ case "$OS" in
     cp "$PATCHES/wasm/config.gn" "build/config/wasm/BUILD.gn"
     
     # ==============================================================
-    # 🚀 唯一正确的注入点：fpdfsdk 目录 🚀
-    echo "Starting clean injection..."
+    # 🚨 检查点：请删除之前所有针对 "BUILD.gn" (不带路径) 的 sed 命令 🚨
+    # ==============================================================
 
-    # 1. 确保安全拷贝
+    echo "Cleaning and Injecting..."
+
+    # 1. 拷贝到正确目录
     cp "$PATCHES/../safe_pdf_wrapper.cpp" fpdfsdk/safe_pdf_wrapper.cpp
 
-    # 2. 精准定位：只修改 fpdfsdk 目录下的 BUILD.gn
-    # 我们找一个绝对存在且唯一的文件 "fpdf_view.cpp" 作为锚点，在它后面插入
+    # 2. 定点注入：只动 fpdfsdk 下的文件，不准碰根目录！
+    # 这一行命令会寻找 fpdfsdk/BUILD.gn 里的 fpdf_view.cpp，并在其后插入
     sed -i '/"fpdf_view.cpp",/a \    "safe_pdf_wrapper.cpp",' fpdfsdk/BUILD.gn
-    
-    # 3. (可选) 如果你以后要加国密 sm2/sm3/sm4.c，按下面这个格式继续加：
-    # sed -i '/"safe_pdf_wrapper.cpp",/a \    "sm2.c",\n    "sm3.c",\n    "sm4.c",' fpdfsdk/BUILD.gn
+
+    echo "Injection target: fpdfsdk/BUILD.gn"
     ;;
 
   win)
