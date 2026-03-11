@@ -49,20 +49,18 @@ case "$OS" in
     mkdir -p "build/config/wasm"
     cp "$PATCHES/wasm/config.gn" "build/config/wasm/BUILD.gn"
     
-    # 1. 确保所有 C/C++ 文件都拷贝到了 fpdfsdk 目录下
-    # 这里包含了你的包装器和国密库（假设你已经准备好了 sm2/3/4 的 .c 文件）
-    cp "$PATCHES/../safe_pdf_wrapper.cpp" fpdfsdk/
-    # 如果有国密文件，一并拷贝
-    # cp "$PATCHES/../sm2.c" fpdfsdk/
-    # cp "$PATCHES/../sm3.c" fpdfsdk/
-    # cp "$PATCHES/../sm4.c" fpdfsdk/
+    # ==============================================================
+    # 🚀 唯一正确的注入点：fpdfsdk 目录 🚀
+    echo "Starting clean injection..."
 
-    # 2. 精准注入：找到 fpdf_view.cpp 这行（它是 PDFium SDK 的核心文件，绝对存在）
-    # 在它后面插入我们的自定义文件
-    # 注意：一定要操作 fpdfsdk/BUILD.gn 而不是根目录的 BUILD.gn
+    # 1. 确保安全拷贝
+    cp "$PATCHES/../safe_pdf_wrapper.cpp" fpdfsdk/safe_pdf_wrapper.cpp
+
+    # 2. 精准定位：只修改 fpdfsdk 目录下的 BUILD.gn
+    # 我们找一个绝对存在且唯一的文件 "fpdf_view.cpp" 作为锚点，在它后面插入
     sed -i '/"fpdf_view.cpp",/a \    "safe_pdf_wrapper.cpp",' fpdfsdk/BUILD.gn
     
-    # 如果你要加国密文件，可以连着写：
+    # 3. (可选) 如果你以后要加国密 sm2/sm3/sm4.c，按下面这个格式继续加：
     # sed -i '/"safe_pdf_wrapper.cpp",/a \    "sm2.c",\n    "sm3.c",\n    "sm4.c",' fpdfsdk/BUILD.gn
     ;;
 
