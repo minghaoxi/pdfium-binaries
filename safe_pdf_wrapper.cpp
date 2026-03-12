@@ -14,6 +14,11 @@
 
 #define MAX_PAGES_TO_TRACK 1024
 
+#define LOG_ERROR(msg) \
+  do { EM_ASM({ console.error(UTF8ToString($0)); }, (msg)); } while (0)
+#define LOG_ERROR_PAGE(msg, page_idx) \
+  do { EM_ASM({ console.error(UTF8ToString($0) + " page_index=" + $1); }, (msg), (page_idx)); } while (0)
+
 // 将英文/数字/符号水印转为 UTF-16LE（水印不包含中文，逐字节扩展即可）
 static void ascii_to_utf16le(const char* src, uint16_t* dst, size_t dst_chars) {
   size_t i = 0;
@@ -35,12 +40,15 @@ static void add_watermark_to_single_page(FPDF_DOCUMENT doc,
   if (font_size <= 0.f) font_size = 10.f;
 
   FPDF_FONT font = FPDFText_LoadStandardFont(doc, "Helvetica");
-  if (!font)
+  if (!font) {
+    LOG_ERROR_PAGE("[safe_pdf_wrapper] FPDFText_LoadStandardFont(Helvetica) failed", page_index);
     return;
+  }
 
   const size_t wlen = strlen(watermark_text);
   uint16_t* wbuf = (uint16_t*)malloc((wlen + 1) * sizeof(uint16_t));
   if (!wbuf) {
+    LOG_ERROR_PAGE("[safe_pdf_wrapper] malloc watermark buffer failed", page_index);
     FPDFFont_Close(font);
     return;
   }
@@ -48,6 +56,7 @@ static void add_watermark_to_single_page(FPDF_DOCUMENT doc,
 
   FPDF_PAGE page = FPDF_LoadPage(doc, page_index);
   if (!page) {
+    LOG_ERROR_PAGE("[safe_pdf_wrapper] FPDF_LoadPage failed", page_index);
     free(wbuf);
     FPDFFont_Close(font);
     return;
@@ -55,6 +64,7 @@ static void add_watermark_to_single_page(FPDF_DOCUMENT doc,
 
   float left, bottom, right, top;
   if (!FPDFPage_GetMediaBox(page, &left, &bottom, &right, &top)) {
+    LOG_ERROR_PAGE("[safe_pdf_wrapper] FPDFPage_GetMediaBox failed", page_index);
     FPDF_ClosePage(page);
     free(wbuf);
     FPDFFont_Close(font);
@@ -132,8 +142,10 @@ FPDF_DOCUMENT FPDF_Custom_LoadMemDocument(uint8_t* data_buffer,
                                          int size,
                                          const char* password) {
   FPDF_DOCUMENT doc = FPDF_LoadMemDocument(data_buffer, size, password);
-  if (!doc)
+  if (!doc) {
+    LOG_ERROR("[safe_pdf_wrapper] FPDF_LoadMemDocument failed");
     return nullptr;
+  }
   s_last_doc = doc;
   memset(s_page_watermarked, 0, sizeof(s_page_watermarked));
   return doc;
@@ -144,7 +156,10 @@ EMSCRIPTEN_KEEPALIVE
 // 内部在加载前对该页按需打水印（对 JS 透明）。
 FPDF_PAGE FPDF_Custom_LoadPage(FPDF_DOCUMENT document, int page_index) {
   add_watermark_to_page_if_needed(document, page_index);
-  return FPDF_LoadPage(document, page_index);
+  FPDF_PAGE page = FPDF_LoadPage(document, page_index);
+  if (!page)
+    LOG_ERROR_PAGE("[safe_pdf_wrapper] FPDF_Custom_LoadPage: FPDF_LoadPage failed", page_index);
+  return page;
 }
 
 }
