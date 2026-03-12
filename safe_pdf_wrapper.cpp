@@ -5,7 +5,14 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <emscripten.h>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+#define MAX_PAGES_TO_TRACK 1024
 
 // 将英文/数字/符号水印转为 UTF-16LE（水印不包含中文，逐字节扩展即可）
 static void ascii_to_utf16le(const char* src, uint16_t* dst, size_t dst_chars) {
@@ -17,16 +24,20 @@ static void ascii_to_utf16le(const char* src, uint16_t* dst, size_t dst_chars) {
   dst[i] = 0;
 }
 
-// 使用 fpdf_edit 在每一页打上 Helvetica 水印
-static void add_watermark_to_document(FPDF_DOCUMENT doc, const char* watermark_text) {
+// 对单页平铺水印：倾斜 angle_degrees 度，字体大小 font_size，充满整页
+static void add_watermark_to_single_page(FPDF_DOCUMENT doc,
+                                         int page_index,
+                                         const char* watermark_text,
+                                         float font_size,
+                                         float angle_degrees) {
   if (!doc || !watermark_text || !watermark_text[0])
     return;
+  if (font_size <= 0.f) font_size = 10.f;
 
   FPDF_FONT font = FPDFText_LoadStandardFont(doc, "Helvetica");
   if (!font)
     return;
 
-  const int nPages = FPDF_GetPageCount(doc);
   const size_t wlen = strlen(watermark_text);
   uint16_t* wbuf = (uint16_t*)malloc((wlen + 1) * sizeof(uint16_t));
   if (!wbuf) {
@@ -35,40 +46,46 @@ static void add_watermark_to_document(FPDF_DOCUMENT doc, const char* watermark_t
   }
   ascii_to_utf16le(watermark_text, wbuf, wlen + 1);
 
-  for (int i = 0; i < nPages; i++) {
-    FPDF_PAGE page = FPDF_LoadPage(doc, i);
-    if (!page)
-      continue;
-
-    float left, bottom, right, top;
-    if (!FPDFPage_GetMediaBox(page, &left, &bottom, &right, &top)) {
-      FPDF_ClosePage(page);
-      continue;
-    }
-    float width = right - left;
-    float height = top - bottom;
-
-    FPDF_PAGEOBJECT textObj = FPDFPageObj_CreateTextObj(doc, font, 24.0f);
-    if (!textObj) {
-      FPDF_ClosePage(page);
-      continue;
-    }
-
-    FPDFText_SetText(textObj, (FPDF_WIDESTRING)wbuf);
-
-    // 页面中心（PDF 坐标系原点在左下角）
-    double x = (double)(width / 2.0f - 60.0f);
-    double y = (double)(height / 2.0f - 12.0f);
-    FPDFPageObj_Transform(textObj, 1, 0, 0, 1, x, y);
-
-    FPDFPageObj_SetFillColor(textObj, 180, 180, 180, 180);
-    FPDFTextObj_SetTextRenderMode(textObj, FPDF_TEXTRENDERMODE_FILL);
-
-    FPDFPage_InsertObject(page, textObj);
-    FPDFPage_GenerateContent(page);
-    FPDF_ClosePage(page);
+  FPDF_PAGE page = FPDF_LoadPage(doc, page_index);
+  if (!page) {
+    free(wbuf);
+    FPDFFont_Close(font);
+    return;
   }
 
+  float left, bottom, right, top;
+  if (!FPDFPage_GetMediaBox(page, &left, &bottom, &right, &top)) {
+    FPDF_ClosePage(page);
+    free(wbuf);
+    FPDFFont_Close(font);
+    return;
+  }
+  const double width = (double)(right - left);
+  const double height = (double)(top - bottom);
+
+  const double angle_rad = (double)angle_degrees * M_PI / 180.0;
+  const double cos_a = cos(angle_rad);
+  const double sin_a = sin(angle_rad);
+  const double step_x = (double)font_size * 7.0;
+  const double step_y = (double)font_size * 4.0;
+
+  for (double y = bottom - height; y < top + height; y += step_y) {
+    for (double x = left - width; x < right + width; x += step_x) {
+      FPDF_PAGEOBJECT textObj = FPDFPageObj_CreateTextObj(doc, font, font_size);
+      if (!textObj)
+        continue;
+
+      FPDFText_SetText(textObj, (FPDF_WIDESTRING)wbuf);
+      FPDFPageObj_Transform(textObj, cos_a, sin_a, -sin_a, cos_a, x, y);
+      FPDFPageObj_SetFillColor(textObj, 180, 180, 180, 180);
+      FPDFTextObj_SetTextRenderMode(textObj, FPDF_TEXTRENDERMODE_FILL);
+
+      FPDFPage_InsertObject(page, textObj);
+    }
+  }
+
+  FPDFPage_GenerateContent(page);
+  FPDF_ClosePage(page);
   free(wbuf);
   FPDFFont_Close(font);
 }
@@ -79,21 +96,55 @@ static const char* get_watermark_text(void) {
   return mock_watermark;
 }
 
+// 记录当前文档下已打过水印的页，避免同一页重复打水印
+static FPDF_DOCUMENT s_last_doc = nullptr;
+static uint8_t s_page_watermarked[MAX_PAGES_TO_TRACK];
+
+// 内部：若该页尚未打过水印则打上，否则跳过（对 JS 不可见）
+static void add_watermark_to_page_if_needed(FPDF_DOCUMENT doc, int page_index) {
+  if (!doc)
+    return;
+  if (doc != s_last_doc) {
+    s_last_doc = doc;
+    memset(s_page_watermarked, 0, sizeof(s_page_watermarked));
+  }
+  if (page_index < 0 || page_index >= MAX_PAGES_TO_TRACK)
+    return;
+  if (s_page_watermarked[page_index])
+    return;
+
+  const char* watermark_text = get_watermark_text();
+  if (!watermark_text || !watermark_text[0])
+    return;
+
+  const float font_size = 10.f;
+  const float angle_degrees = 45.f;
+  add_watermark_to_single_page(doc, page_index, watermark_text, font_size, angle_degrees);
+  s_page_watermarked[page_index] = 1;
+}
+
 extern "C" {
 
 EMSCRIPTEN_KEEPALIVE
 // data_buffer: PDF 二进制；size: 长度；password: 密码，无则传 null/0。
-// 内部调用 get_watermark_text() 获取水印字符串并打水印。
+// 仅加载文档，不打水印。
 FPDF_DOCUMENT FPDF_Custom_LoadMemDocument(uint8_t* data_buffer,
                                          int size,
                                          const char* password) {
   FPDF_DOCUMENT doc = FPDF_LoadMemDocument(data_buffer, size, password);
   if (!doc)
     return nullptr;
-
-  const char* watermark_text = get_watermark_text();
-  add_watermark_to_document(doc, watermark_text);
+  s_last_doc = doc;
+  memset(s_page_watermarked, 0, sizeof(s_page_watermarked));
   return doc;
+}
+
+EMSCRIPTEN_KEEPALIVE
+// 翻页/加载页：JS 只调用此方法加载指定页，与 FPDF_LoadPage 行为一致。
+// 内部在加载前对该页按需打水印（对 JS 透明）。
+FPDF_PAGE FPDF_Custom_LoadPage(FPDF_DOCUMENT document, int page_index) {
+  add_watermark_to_page_if_needed(document, page_index);
+  return FPDF_LoadPage(document, page_index);
 }
 
 }
