@@ -76,8 +76,8 @@ static void add_watermark_to_single_page(FPDF_DOCUMENT doc,
   const double angle_rad = (double)angle_degrees * M_PI / 180.0;
   const double cos_a = cos(angle_rad);
   const double sin_a = sin(angle_rad);
-  const double step_x = (double)font_size * 7.0;
-  const double step_y = (double)font_size * 4.0;
+  const double step_x = (double)font_size * 12.0;
+  const double step_y = (double)font_size * 7.0;
 
   for (double y = bottom - height; y < top + height; y += step_y) {
     for (double x = left - width; x < right + width; x += step_x) {
@@ -160,6 +160,45 @@ FPDF_PAGE FPDF_Custom_LoadPage(FPDF_DOCUMENT document, int page_index) {
   if (!page)
     LOG_ERROR_PAGE("[safe_pdf_wrapper] FPDF_Custom_LoadPage: FPDF_LoadPage failed", page_index);
   return page;
+}
+
+// 探照灯模式：将 page_buffer（BGRA）复制到 output_buffer（RGBA），仅保留圆心 (center_x, center_y)、
+// 半径 radius 内的像素为真实 RGB，其余位置置 0。stride 为源每行字节数（通常 width*4）。
+EMSCRIPTEN_KEEPALIVE
+void FPDF_Custom_ApplySpotlight(uint8_t* page_buffer,
+                                uint8_t* output_buffer,
+                                int width,
+                                int height,
+                                int stride,
+                                int center_x,
+                                int center_y,
+                                int radius) {
+  if (!page_buffer || !output_buffer || width <= 0 || height <= 0 || stride < width * 4)
+    return;
+  const int64_t r2 = (int64_t)radius * (int64_t)radius;
+  const size_t out_stride = (size_t)width * 4;
+  for (int y = 0; y < height; y++) {
+    const int64_t dy = (int64_t)y - (int64_t)center_y;
+    const int64_t dy2 = dy * dy;
+    const uint8_t* src_row = page_buffer + (size_t)y * (size_t)stride;
+    uint8_t* dst_row = output_buffer + (size_t)y * out_stride;
+    for (int x = 0; x < width; x++) {
+      const int64_t dx = (int64_t)x - (int64_t)center_x;
+      const size_t src_off = (size_t)x * 4;
+      const size_t dst_off = src_off;
+      if (radius <= 0 || dx * dx + dy2 > r2) {
+        dst_row[dst_off] = 0;
+        dst_row[dst_off + 1] = 0;
+        dst_row[dst_off + 2] = 0;
+        dst_row[dst_off + 3] = 0;
+      } else {
+        dst_row[dst_off] = src_row[src_off + 2];
+        dst_row[dst_off + 1] = src_row[src_off + 1];
+        dst_row[dst_off + 2] = src_row[src_off];
+        dst_row[dst_off + 3] = src_row[src_off + 3];
+      }
+    }
+  }
 }
 
 }
