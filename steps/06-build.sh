@@ -9,7 +9,8 @@ ninja -C "$BUILD_DIR" pdfium
 
 if [ "$TARGET_CPU" == "wasm" ]; then
   LIBPDFIUMA="$BUILD_DIR/obj/libpdfium.a"
-  EXPORTED_FUNCTIONS=$(llvm-nm $LIBPDFIUMA --format=just-symbols | grep "^FPDF\|^FSDK\|^FORM\|^IFSDK" | sed 's/^/_/' | paste -sd "," -)
+  # 排除可导出 PDF 二进制的 API，避免 JS 通过文档句柄拿到明文
+  EXPORTED_FUNCTIONS=$(llvm-nm $LIBPDFIUMA --format=just-symbols | grep "^FPDF\|^FSDK\|^FORM\|^IFSDK" | grep -v "^FPDF_SaveAsCopy$" | grep -v "^FPDF_SaveWithVersion$" | sed 's/^/_/' | paste -sd "," -)
   EMCC_ARGS=(
     -s ALLOW_MEMORY_GROWTH=1
     -s ALLOW_TABLE_GROWTH=1
